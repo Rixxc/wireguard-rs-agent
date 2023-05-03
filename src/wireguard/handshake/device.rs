@@ -1,7 +1,7 @@
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
 use dashmap::mapref::entry::Entry;
@@ -15,6 +15,7 @@ use clear_on_drop::clear::Clear;
 
 use x25519_dalek::PublicKey;
 use x25519_dalek::StaticSecret;
+use crate::agent::ipc::IPC;
 
 use super::macs;
 use super::messages::{CookieReply, Initiation, Response};
@@ -27,9 +28,9 @@ use super::types::*;
 const MAX_PEER_PER_DEVICE: usize = 1 << 20;
 
 pub struct KeyState {
-    pub(super) sk: StaticSecret, // static secret key
-    pub(super) pk: PublicKey,    // static public key
-    macs: macs::Validator,       // validator for the mac fields
+    pub(crate) sk: StaticSecret, // static secret key
+    pub(crate) pk: PublicKey,    // static public key
+    pub(crate) macs: macs::Validator,       // validator for the mac fields
 }
 
 /// The device is generic over an "opaque" type
@@ -310,6 +311,7 @@ impl<O> Device<O> {
         rng: &mut R,             // rng instance to sample randomness from
         msg: &[u8],              // message buffer
         src: Option<SocketAddr>, // optional source endpoint, set when "under load"
+        ipc: Arc<spin::Mutex<IPC>>
     ) -> Result<Output<'a, O>, HandshakeError> {
         // ensure type read in-range
         if msg.len() < 4 {
@@ -365,7 +367,8 @@ impl<O> Device<O> {
                 let mut resp = Response::default();
 
                 // create response (release id on error)
-                let keys = noise::create_response(rng, peer, &pk, local, st, &mut resp.noise)
+                let result = noise::create_response(rng, peer, &pk, local, st, &mut resp.noise);
+                let keys = result
                     .map_err(|e| {
                         self.release(local);
                         e

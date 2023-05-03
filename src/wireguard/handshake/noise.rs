@@ -218,7 +218,7 @@ mod tests {
 // This is not recommended by the Noise specification,
 // but implemented in the kernel with which we strive for absolute equivalent behavior.
 #[inline(always)]
-fn shared_secret(sk: &StaticSecret, pk: &PublicKey) -> Result<SharedSecret, HandshakeError> {
+pub fn shared_secret(sk: &StaticSecret, pk: &PublicKey) -> Result<SharedSecret, HandshakeError> {
     let ss = sk.diffie_hellman(pk);
     if ss.as_bytes().ct_eq(&[0u8; 32]).into() {
         Err(HandshakeError::InvalidSharedSecret)

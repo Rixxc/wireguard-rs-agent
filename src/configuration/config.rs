@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::Ordering;
@@ -5,6 +6,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use x25519_dalek::{PublicKey, StaticSecret};
+use crate::agent::ipc::IPC;
 
 use super::udp::Owner;
 use super::*;
@@ -31,7 +33,7 @@ pub struct PeerState {
 pub struct WireGuardConfig<T: tun::Tun, B: udp::PlatformUDP>(Arc<Mutex<Inner<T, B>>>);
 
 struct Inner<T: tun::Tun, B: udp::PlatformUDP> {
-    wireguard: WireGuard<T, B>,
+    pub wireguard: WireGuard<T, B>,
     port: u16,
     bind: Option<B::Owner>,
     fwmark: Option<u32>,
@@ -62,6 +64,10 @@ impl<T: tun::Tun, B: udp::PlatformUDP> Clone for WireGuardConfig<T, B> {
 
 /// Exposed configuration interface
 pub trait Configuration {
+    fn perform_ipc_call(&self, msg: &[u8]);
+
+    fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> [u8; 200];
+
     fn up(&self, mtu: usize) -> Result<(), ConfigError>;
 
     fn down(&self);
@@ -222,6 +228,24 @@ fn start_listener<T: tun::Tun, B: udp::PlatformUDP>(
 }
 
 impl<T: tun::Tun, B: udp::PlatformUDP> Configuration for WireGuardConfig<T, B> {
+    fn perform_ipc_call(&self, msg: &[u8]) {
+        let mut cfg = self.lock();
+        let mut ipc = cfg.wireguard.ipc.lock();
+        ipc.writer.write(msg).unwrap();
+        ipc.writer.flush().unwrap();
+    }
+
+    fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> [u8; 200] {
+        let mut cfg = self.lock();
+        let mut ipc = cfg.wireguard.ipc.lock();
+        ipc.writer.write(msg).unwrap();
+        ipc.writer.flush().unwrap();
+
+        let mut resp = [0u8; 200];
+        let size = ipc.reader.read(&mut resp).unwrap();
+        return resp;
+    }
+
     fn up(&self, mtu: usize) -> Result<(), ConfigError> {
         log::info!("configuration, set device up");
         let cfg = self.lock();
@@ -236,10 +260,6 @@ impl<T: tun::Tun, B: udp::PlatformUDP> Configuration for WireGuardConfig<T, B> {
         cfg.bind = None;
     }
 
-    fn get_fwmark(&self) -> Option<u32> {
-        self.lock().fwmark
-    }
-
     fn set_private_key(&self, sk: Option<StaticSecret>) {
         log::info!("configuration, set private key");
         self.lock().wireguard.set_key(sk)
@@ -251,12 +271,6 @@ impl<T: tun::Tun, B: udp::PlatformUDP> Configuration for WireGuardConfig<T, B> {
 
     fn get_protocol_version(&self) -> usize {
         1
-    }
-
-    fn get_listen_port(&self) -> Option<u16> {
-        let st = self.lock();
-        log::trace!("Config, Get listen port, bound: {}", st.bind.is_some());
-        st.bind.as_ref().map(|bind| bind.get_port())
     }
 
     fn set_listen_port(&self, port: u16) -> Result<(), ConfigError> {
@@ -332,24 +346,11 @@ impl<T: tun::Tun, B: udp::PlatformUDP> Configuration for WireGuardConfig<T, B> {
         }
     }
 
-    /*
-
-
-    pub fn list_peers(
-        &self,
-    ) -> Vec<(
-        PublicKey,
-        router::PeerHandle<B::Endpoint, PeerInner<T, B>, T::Writer, B::Writer>,
-    )> {
-        let peers = self.peers.read();
-        let mut list = Vec::with_capacity(peers.len());
-        for (k, v) in peers.iter() {
-            debug_assert!(k.as_bytes() == v.opaque().pk.as_bytes());
-            list.push((k.clone(), v.clone()));
-        }
-        list
+    fn get_listen_port(&self) -> Option<u16> {
+        let st = self.lock();
+        log::trace!("Config, Get listen port, bound: {}", st.bind.is_some());
+        st.bind.as_ref().map(|bind| bind.get_port())
     }
-    */
 
     fn get_peers(&self) -> Vec<PeerState> {
         let cfg = self.lock();
@@ -380,5 +381,28 @@ impl<T: tun::Tun, B: udp::PlatformUDP> Configuration for WireGuardConfig<T, B> {
             }
         }
         state
+    }
+
+    /*
+
+
+    pub fn list_peers(
+        &self,
+    ) -> Vec<(
+        PublicKey,
+        router::PeerHandle<B::Endpoint, PeerInner<T, B>, T::Writer, B::Writer>,
+    )> {
+        let peers = self.peers.read();
+        let mut list = Vec::with_capacity(peers.len());
+        for (k, v) in peers.iter() {
+            debug_assert!(k.as_bytes() == v.opaque().pk.as_bytes());
+            list.push((k.clone(), v.clone()));
+        }
+        list
+    }
+    */
+
+    fn get_fwmark(&self) -> Option<u32> {
+        self.lock().fwmark
     }
 }

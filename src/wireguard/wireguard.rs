@@ -13,6 +13,7 @@ use super::udp::UDP;
 use super::workers::{handshake_worker, tun_worker, udp_worker};
 
 use std::fmt;
+use std::io::{Read, Write};
 use std::thread;
 
 use std::ops::Deref;
@@ -28,6 +29,7 @@ use rand::Rng;
 use hjul::Runner;
 use spin::{Mutex, RwLock};
 use x25519_dalek::{PublicKey, StaticSecret};
+use crate::agent::ipc::IPC;
 
 pub struct WireguardInner<T: Tun, B: UDP> {
     // identifier (for logging)
@@ -62,6 +64,7 @@ pub struct WireguardInner<T: Tun, B: UDP> {
 
 pub struct WireGuard<T: Tun, B: UDP> {
     inner: Arc<WireguardInner<T, B>>,
+    pub ipc: Arc<Mutex<IPC>>
 }
 
 pub struct WaitCounter(StdMutex<usize>, Condvar);
@@ -83,6 +86,7 @@ impl<T: Tun, B: UDP> Clone for WireGuard<T, B> {
     fn clone(&self) -> Self {
         WireGuard {
             inner: self.inner.clone(),
+            ipc: self.ipc.clone()
         }
     }
 }
@@ -265,7 +269,7 @@ impl<T: Tun, B: UDP> WireGuard<T, B> {
         self.tun_readers.wait();
     }
 
-    pub fn new(writer: T::Writer) -> WireGuard<T, B> {
+    pub fn new(writer: T::Writer, ipc: Arc<Mutex<IPC>>) -> WireGuard<T, B> {
         // workers equal to number of physical cores
         let cpus = num_cpus::get();
 
@@ -290,6 +294,7 @@ impl<T: Tun, B: UDP> WireGuard<T, B> {
                 runner: Mutex::new(Runner::new(TIMERS_TICK, TIMERS_SLOTS, TIMERS_CAPACITY)),
                 queue: tx,
             }),
+            ipc
         };
 
         // start handshake workers
@@ -299,5 +304,21 @@ impl<T: Tun, B: UDP> WireGuard<T, B> {
         }
 
         wg
+    }
+
+    fn perform_ipc_call(&self, msg: &[u8]) {
+        let mut ipc = self.ipc.lock();
+        ipc.writer.write(msg).unwrap();
+        ipc.writer.flush().unwrap();
+    }
+
+    fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> [u8; 200] {
+        let mut ipc = self.ipc.lock();
+        ipc.writer.write(msg).unwrap();
+        ipc.writer.flush().unwrap();
+
+        let mut resp = [0u8; 200];
+        let size = ipc.reader.read(&mut resp).unwrap();
+        return resp;
     }
 }

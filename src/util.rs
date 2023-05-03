@@ -1,8 +1,14 @@
 use std::cmp::Ordering;
 use std::fmt;
+use std::fs::File;
+use std::os::fd::FromRawFd;
 use std::process::exit;
+use std::sync::Arc;
 
-use libc::{c_char, chdir, chroot, fork, getpwnam, getuid, setgid, setsid, setuid, umask};
+use libc::{c_char, chdir, chroot, fork, getpwnam, getuid, setgid, setsid, setuid, umask, pipe2, c_int, O_DIRECT, close};
+use spin::Mutex;
+use crate::agent::agent::agent_worker;
+use crate::agent::ipc::IPC;
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum DaemonizeError {
@@ -12,6 +18,7 @@ pub enum DaemonizeError {
     SetUser,
     Chroot,
     Chdir,
+    Pipe,
 }
 
 impl fmt::Display for DaemonizeError {
@@ -23,6 +30,7 @@ impl fmt::Display for DaemonizeError {
             DaemonizeError::SetUser => "unable to set user (drop privileges)",
             DaemonizeError::Chroot => "unable to enter chroot jail",
             DaemonizeError::Chdir => "failed to change directory",
+            DaemonizeError::Pipe => "failed to create pipe",
         }
         .fmt(f)
     }
@@ -81,5 +89,54 @@ pub fn drop_privileges() -> Result<(), DaemonizeError> {
         Err(DaemonizeError::SetUser)
     } else {
         Ok(())
+    }
+}
+
+pub fn start_crypto_agent<>() -> Result<Arc<Mutex<IPC>>, DaemonizeError> {
+    // read / write fd
+    let client_to_agent: [c_int; 2] = [0; 2];
+    let agent_to_client: [c_int; 2] = [0; 2];
+
+    unsafe {
+        let mut pipe = pipe2(client_to_agent.as_ptr() as *mut c_int, O_DIRECT);
+        pipe |= pipe2(agent_to_client.as_ptr() as *mut c_int, O_DIRECT);
+
+        if pipe != 0 {
+            return Err(DaemonizeError::Pipe);
+        }
+    }
+
+    let pid = unsafe { fork() };
+    match pid.cmp(&0) {
+        Ordering::Less => Err(DaemonizeError::Fork),
+        Ordering::Equal => {
+            // client
+            unsafe {
+                close(client_to_agent[0]);
+                close(agent_to_client[1]);
+
+                Ok(Arc::new(Mutex::new(IPC {
+                    writer: File::from_raw_fd(client_to_agent[1]),
+                    reader: File::from_raw_fd(agent_to_client[0])
+                })))
+            }
+        },
+        Ordering::Greater => {
+            // agent
+            unsafe {
+                close(client_to_agent[1]);
+                close(agent_to_client[0]);
+
+                agent_worker(IPC {
+                    writer: File::from_raw_fd(agent_to_client[1]),
+                    reader: File::from_raw_fd(client_to_agent[0])
+                }); // should never return
+
+                Ok(Arc::new(Mutex::new(IPC {
+                    writer: File::from_raw_fd(agent_to_client[1]),
+                    reader: File::from_raw_fd(client_to_agent[0])
+                })))
+            }
+        },
     }
 }

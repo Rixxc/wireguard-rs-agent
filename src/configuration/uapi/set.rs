@@ -2,6 +2,8 @@ use hex::FromHex;
 use std::net::{IpAddr, SocketAddr};
 use subtle::ConstantTimeEq;
 use x25519_dalek::{PublicKey, StaticSecret};
+use crate::agent::ipc::{RegisterPublicKey, SetPrivateKey};
+use zerocopy::AsBytes;
 
 use super::{ConfigError, Configuration};
 
@@ -100,8 +102,17 @@ impl<'a, C: Configuration> LineParser<'a, C> {
                 config.set_endpoint(&peer.public_key, endpoint);
             };
 
+            config.perform_ipc_call(RegisterPublicKey {
+                request_type: 1,
+                public_key: *peer.public_key.as_bytes(),
+                preshared_key: match peer.preshared_key {
+                    Some(psk) => psk,
+                    None => [0u8; 32]
+                }
+            }.as_bytes());
+
             None
-        };
+        }
 
         // parse line and update parser state
         match self.state {
@@ -113,6 +124,9 @@ impl<'a, C: Configuration> LineParser<'a, C> {
                         self.config.set_private_key(if sk.ct_eq(&[0u8; 32]).into() {
                             None
                         } else {
+                            let pk = SetPrivateKey { request_type: 0, private_key: sk };
+                            self.config.perform_ipc_call(&pk.as_bytes());
+
                             Some(StaticSecret::from(sk))
                         });
                         Ok(())

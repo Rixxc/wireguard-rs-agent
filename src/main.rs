@@ -11,6 +11,7 @@ use cpuprofiler::PROFILER;
 mod configuration;
 mod platform;
 mod wireguard;
+mod agent;
 
 mod util;
 
@@ -25,6 +26,7 @@ use platform::uapi::{BindUAPI, PlatformUAPI};
 use platform::*;
 
 use wireguard::WireGuard;
+use crate::util::start_crypto_agent;
 
 #[cfg(feature = "profiler")]
 fn profiler_stop() {
@@ -94,6 +96,12 @@ fn main() {
         exit(-3);
     });
 
+    // create crypto agent
+    let ipc = start_crypto_agent().unwrap_or_else(|e| {
+        eprintln!("Failed to start crypto agent: {}", e);
+        exit(-6);
+    });
+
     // drop privileges
     if drop_privileges {
         match util::drop_privileges() {
@@ -128,7 +136,7 @@ fn main() {
     profiler_start(name.as_str());
 
     // create WireGuard device
-    let wg: WireGuard<plt::Tun, plt::UDP> = WireGuard::new(writer);
+    let wg: WireGuard<plt::Tun, plt::UDP> = WireGuard::new(writer, ipc);
 
     // add all Tun readers
     while let Some(reader) = readers.pop() {

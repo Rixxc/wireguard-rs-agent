@@ -6,14 +6,14 @@
  * For documentation.
  */
 
-mod device;
-mod macs;
-mod messages;
-mod noise;
-mod peer;
-mod ratelimiter;
-mod timestamp;
-mod types;
+pub(crate) mod device;
+pub(crate) mod macs;
+pub(crate) mod messages;
+pub(crate) mod noise;
+pub(crate) mod peer;
+pub(crate) mod ratelimiter;
+pub(crate) mod timestamp;
+pub(crate) mod types;
 
 #[cfg(test)]
 mod tests;

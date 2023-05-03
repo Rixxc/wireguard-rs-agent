@@ -306,19 +306,19 @@ impl<T: Tun, B: UDP> WireGuard<T, B> {
         wg
     }
 
-    fn perform_ipc_call(&self, msg: &[u8]) {
+    pub fn perform_ipc_call(&self, msg: &[u8]) {
         let mut ipc = self.ipc.lock();
         ipc.writer.write(msg).unwrap();
         ipc.writer.flush().unwrap();
     }
 
-    fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> [u8; 200] {
+    pub fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> (usize, [u8; 200]) {
         let mut ipc = self.ipc.lock();
         ipc.writer.write(msg).unwrap();
         ipc.writer.flush().unwrap();
 
         let mut resp = [0u8; 200];
         let size = ipc.reader.read(&mut resp).unwrap();
-        return resp;
+        return (size, resp);
     }
 }

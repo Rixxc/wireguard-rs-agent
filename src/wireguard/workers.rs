@@ -188,7 +188,7 @@ pub fn handshake_worker<T: Tun, B: UDP>(
                     } else {
                         None
                     },
-                    wg.ipc.clone(),
+                    wg,
                 ) {
                     Ok((peer, resp, keypair)) => {
                         // send response (might be cookie reply or handshake response)

@@ -7,13 +7,14 @@ use crate::agent::ipc::RegisterPublicKey;
 use crate::agent::types::{Peer, State};
 use crate::wireguard::handshake::device::KeyState;
 use crate::wireguard::handshake::{macs, timestamp};
-use crate::wireguard::handshake::messages::NoiseInitiation;
+use crate::wireguard::handshake::messages::{NoiseInitiation, NoiseResponse};
 use crate::wireguard::handshake::types::HandshakeError;
 use crate::wireguard::handshake::noise::shared_secret;
 use chacha20poly1305::ChaCha20Poly1305;
 use clear_on_drop::clear::Clear;
 use aead::{Payload, NewAead, Aead};
 use digest::consts::U32;
+use spin::Mutex;
 use subtle::ConstantTimeEq;
 
 // HMAC hasher (generic construction)
@@ -138,7 +139,10 @@ pub fn register_public_key(public_key: &RegisterPublicKey, state: &mut State) {
         ss: state.keyst
             .as_ref()
             .map(|key| *key.sk.diffie_hellman(&pk).as_bytes())
-            .unwrap_or([0u8; 32])
+            .unwrap_or([0u8; 32]),
+        state: Mutex::new(crate::wireguard::handshake::peer::State::Reset),
+        timestamp: Mutex::new(None),
+        last_initiation_consumption: Mutex::new(None)
     });
 }
 
@@ -186,7 +190,7 @@ pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Res
 
         // reset initiation state
 
-        //*peer.state.lock() = State::Reset;
+        *peer.state.lock() = crate::wireguard::handshake::peer::State::Reset;
 
         // H := Hash(H || msg.static)
 
@@ -209,7 +213,7 @@ pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Res
 
         // check and update timestamp
 
-        // peer.check_replay_flood(device, &ts)?;
+        peer.check_replay_flood(&ts)?;
 
         // H := Hash(H || msg.timestamp)
 

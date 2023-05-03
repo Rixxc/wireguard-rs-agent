@@ -41,11 +41,12 @@ pub struct ConsumeInitiator {
 #[repr(packed)]
 #[derive(FromBytes, AsBytes)]
 pub struct ConsumeInitiatorResponse {
-    error: u8,
-    receiver: u32,
-    eph_r_pk: [u8; 32],
-    hs: [u8; 32],
-    ck: [u8; 32]
+    pub error: u8,
+    pub receiver: u32,
+    pub eph_r_pk: [u8; 32],
+    pub hs: [u8; 32],
+    pub ck: [u8; 32],
+    pub peer_pk: [u8; 32]
 }
 
 impl IPC {
@@ -73,7 +74,8 @@ impl IPC {
                         receiver: resp.2.0,
                         eph_r_pk: resp.2.1.to_bytes(),
                         hs: resp.2.2.try_into().unwrap(),
-                        ck: resp.2.3.try_into().unwrap()
+                        ck: resp.2.3.try_into().unwrap(),
+                        peer_pk: resp.1.to_bytes()
                     }.as_bytes()).unwrap();
                 } else {
                     self.writer.write(ConsumeInitiatorResponse {
@@ -81,7 +83,8 @@ impl IPC {
                         receiver: 0,
                         eph_r_pk: [0u8; 32],
                         hs: [0u8; 32],
-                        ck: [0u8; 32]
+                        ck: [0u8; 32],
+                        peer_pk: [0u8; 32]
                     }.as_bytes()).unwrap();
 
                     self.writer.flush().unwrap();

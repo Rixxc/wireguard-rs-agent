@@ -36,7 +36,7 @@ type HMACBlake2s = Hmac<Blake2s>;
 
 // convenient alias to pass state temporarily into device.rs and back
 
-type TemporaryState = (u32, PublicKey, GenericArray<u8, U32>, GenericArray<u8, U32>);
+pub type TemporaryState = (u32, PublicKey, GenericArray<u8, U32>, GenericArray<u8, U32>);
 
 const SIZE_CK: usize = 32;
 const SIZE_HS: usize = 32;

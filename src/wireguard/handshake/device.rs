@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use byteorder::{ByteOrder, LittleEndian};
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, LayoutVerified};
 
 use rand::Rng;
 use rand_core::{CryptoRng, RngCore};
@@ -15,7 +15,11 @@ use clear_on_drop::clear::Clear;
 
 use x25519_dalek::PublicKey;
 use x25519_dalek::StaticSecret;
-use crate::agent::ipc::IPC;
+use crate::agent::ipc::{ConsumeInitiator, ConsumeInitiatorResponse, IPC};
+use crate::platform;
+use crate::wireguard::handshake::noise::TemporaryState;
+use crate::wireguard::handshake::peer::State;
+use crate::wireguard::WireGuard;
 
 use super::macs;
 use super::messages::{CookieReply, Initiation, Response};
@@ -306,12 +310,12 @@ impl<O> Device<O> {
     /// # Arguments
     ///
     /// * `msg` - Byte slice containing the message (untrusted input)
-    pub fn process<'a, R: RngCore + CryptoRng>(
+    pub fn process<'a, R: RngCore + CryptoRng, T: platform::tun::Tun, B: platform::udp::UDP>(
         &'a self,
         rng: &mut R,             // rng instance to sample randomness from
         msg: &[u8],              // message buffer
         src: Option<SocketAddr>, // optional source endpoint, set when "under load"
-        ipc: Arc<spin::Mutex<IPC>>
+        wg: &WireGuard<T, B>
     ) -> Result<Output<'a, O>, HandshakeError> {
         // ensure type read in-range
         if msg.len() < 4 {
@@ -358,7 +362,21 @@ impl<O> Device<O> {
                 }
 
                 // consume the initiation
-                let (peer, pk, st) = noise::consume_initiation(self, keyst, &msg.noise)?;
+                // let (peer, pk, st) = noise::consume_initiation(self, keyst, &msg.noise)?;
+                let (size, data) = wg.perform_ipc_call_and_get_response(ConsumeInitiator {
+                    request_type: 2,
+                    initiation: *msg
+                }.as_bytes());
+
+                let resp: LayoutVerified<&[u8], ConsumeInitiatorResponse> = LayoutVerified::new(&data[..size]).unwrap();
+
+                if resp.error != 0 {
+                    return Err(HandshakeError::InvalidSharedSecret);
+                }
+
+                let peer = self.pk_map.get(&resp.peer_pk).unwrap();
+                let pk = PublicKey::from(resp.peer_pk);
+                let st: TemporaryState = (resp.receiver, PublicKey::from(resp.eph_r_pk), resp.hs.into(), resp.ck.into());
 
                 // allocate new index for response
                 let local = self.allocate(rng, &pk);

@@ -1,7 +1,9 @@
 use std::collections::hash_map;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use byteorder::{ByteOrder, LittleEndian};
 use dashmap::mapref::entry::Entry;
@@ -12,14 +14,17 @@ use rand::Rng;
 use rand_core::{CryptoRng, RngCore};
 
 use clear_on_drop::clear::Clear;
+use subtle::ConstantTimeEq;
 
 use x25519_dalek::PublicKey;
 use x25519_dalek::StaticSecret;
-use crate::agent::ipc::{ConsumeInitiator, ConsumeInitiatorResponse, IPC};
+use crate::agent::ipc::{ConsumeInitiator, ConsumeInitiatorResponse, ConsumeResponse, ConsumeResponseResponse, IPC};
 use crate::platform;
 use crate::wireguard::handshake::noise::TemporaryState;
 use crate::wireguard::handshake::peer::State;
+use crate::wireguard::types::KeyPair;
 use crate::wireguard::WireGuard;
+use crate::wireguard::types::Key;
 
 use super::macs;
 use super::messages::{CookieReply, Initiation, Response};
@@ -432,7 +437,73 @@ impl<O> Device<O> {
                 }
 
                 // consume inner playload
-                noise::consume_response(self, keyst, &msg.noise)
+                // noise::consume_response(self, keyst, &msg.noise)
+
+                let (peer, peer_pk) = self.lookup_id(msg.noise.f_receiver.get())?;
+
+                let (hs, ck, local, eph_sk) = match *peer.state.lock() {
+                    State::InitiationSent {
+                        hs,
+                        ck,
+                        local,
+                        ref eph_sk,
+                    } => Ok((hs, ck, local, StaticSecret::from(eph_sk.to_bytes()))),
+                    _ => Err(HandshakeError::InvalidState),
+                }?;
+
+                let (size, data) = wg.perform_ipc_call_and_get_response(ConsumeResponse {
+                    request_type: 3,
+                    response: *msg,
+                    hs: hs.try_into().unwrap(),
+                    ck: ck.try_into().unwrap(),
+                    eph_sk: eph_sk.to_bytes(),
+                    peer_pk: peer_pk.to_bytes()
+                }.as_bytes());
+
+                let resp: LayoutVerified<&[u8], ConsumeResponseResponse> = LayoutVerified::new(&data[..size]).unwrap();
+
+                if resp.error != 0 {
+                    return Err(HandshakeError::InvalidSharedSecret);
+                }
+
+                let birth = Instant::now();
+
+                // check for new initiation sent while lock released
+
+                let mut state = peer.state.lock();
+                let update = match *state {
+                    State::InitiationSent {
+                        eph_sk: ref old, ..
+                    } => old.to_bytes().ct_eq(&eph_sk.to_bytes()).into(),
+                    _ => false,
+                };
+
+                if update {
+                    // null the initiation state
+                    // (to avoid replay of this response message)
+                    *state = State::Reset;
+                    let remote = msg.noise.f_sender.get();
+
+                    // return confirmed key-pair
+                    Ok((
+                        Some(&peer.opaque),
+                        None,
+                        Some(KeyPair {
+                            birth,
+                            initiator: true,
+                            send: Key {
+                                id: remote,
+                                key: resp.key_send.into(),
+                            },
+                            recv: Key {
+                                id: local,
+                                key: resp.key_recv.into(),
+                            },
+                        }),
+                    ))
+                } else {
+                    Err(HandshakeError::InvalidState)
+                }
             }
             TYPE_COOKIE_REPLY => {
                 let msg = CookieReply::parse(msg)?;

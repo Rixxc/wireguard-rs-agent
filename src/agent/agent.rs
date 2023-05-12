@@ -12,6 +12,9 @@ pub fn agent_worker(mut ipc: IPC) {
     let mut state: State = State::new();
 
     loop {
-        ipc.handle_ipc_request(&mut state);
+        match ipc.handle_ipc_request(&mut state) {
+            Ok(()) => {},
+            Err(e) => log::error!("{:?}", e)
+        };
     }
 }

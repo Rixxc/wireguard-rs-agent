@@ -1,9 +1,10 @@
+use std::time::Instant;
 use blake2::Blake2s;
 use clear_on_drop::clear_stack_on_return_fnonce;
 use generic_array::GenericArray;
 use hmac::Hmac;
 use x25519_dalek::{PublicKey, StaticSecret};
-use crate::agent::ipc::RegisterPublicKey;
+use crate::agent::ipc::{ConsumeResponse, RegisterPublicKey};
 use crate::agent::types::{Peer, State};
 use crate::wireguard::handshake::device::KeyState;
 use crate::wireguard::handshake::{macs, timestamp};
@@ -149,7 +150,7 @@ pub fn register_public_key(public_key: &RegisterPublicKey, state: &mut State) {
 pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Result<(&'a Peer, PublicKey, TemporaryState), HandshakeError> {
     clear_stack_on_return_fnonce(CLEAR_PAGES, move || {
         // initialize new state
-        let keyst = &state.keyst.as_ref().unwrap();
+        let keyst = state.keyst.as_ref().unwrap();
 
         let ck = INITIAL_CK;
         let hs = INITIAL_HS;
@@ -180,7 +181,7 @@ pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Res
         )?;
 
         //let peer = device.lookup_pk(&PublicKey::from(pk))?;
-        let peer = state.pk_map.get(&pk).unwrap();
+        let peer = state.pk_map.get(&pk).ok_or(HandshakeError::UnknownPublicKey)?;
 
         // check for zero shared-secret (see "shared_secret" note).
 
@@ -226,5 +227,57 @@ pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Res
             PublicKey::from(pk),
             (msg.f_sender.get(), eph_r_pk, hs, ck),
         ))
+    })
+}
+
+pub fn consume_response<'a>(resp: &ConsumeResponse, state: &'a mut State) -> Result<(GenericArray<u8, U32>, GenericArray<u8, U32>), HandshakeError> {
+    clear_stack_on_return_fnonce(CLEAR_PAGES, || {
+        // retrieve peer and copy initiation state
+        let peer = state.pk_map.get(&resp.peer_pk).ok_or(HandshakeError::UnknownPublicKey)?;
+        log::debug!("After peer");
+        let keyst = state.keyst.as_ref().unwrap();
+
+        log::debug!("After keyst");
+
+        // C := Kdf1(C, E_pub)
+
+        let ck = KDF1!(&resp.ck, &resp.response.noise.f_ephemeral);
+
+        // H := Hash(H || msg.ephemeral)
+
+        let hs = HASH!(resp.hs, &resp.response.noise.f_ephemeral);
+
+        // C := Kdf1(C, DH(E_priv, E_pub))
+
+        let eph_r_pk = PublicKey::from(resp.response.noise.f_ephemeral);
+        let ck = KDF1!(&ck, shared_secret(&StaticSecret::from(resp.eph_sk), &eph_r_pk)?.as_bytes());
+        log::debug!("After first dh");
+
+        // C := Kdf1(C, DH(E_priv, S_pub))
+
+        let ck = KDF1!(&ck, shared_secret(&keyst.sk, &eph_r_pk)?.as_bytes());
+        log::debug!("after second dh");
+
+        // (C, tau, k) := Kdf3(C, Q)
+
+        let (ck, tau, key) = KDF3!(&ck, &peer.psk);
+
+        // H := Hash(H || tau)
+
+        let hs = HASH!(&hs, tau);
+
+        // msg.empty := Aead(k, 0, [], H)
+
+        OPEN!(
+            &key,
+            &hs,          // ad
+            &mut [],      // pt
+            &resp.response.noise.f_empty  // \epsilon || tag
+        )?;
+
+        // derive key-pair
+        let (key_send, key_recv) = KDF2!(&ck, &[]);
+
+        Ok((key_send, key_recv))
     })
 }

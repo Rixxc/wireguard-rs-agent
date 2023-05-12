@@ -5,7 +5,7 @@ use std::os::fd::FromRawFd;
 use std::process::exit;
 use std::sync::Arc;
 
-use libc::{c_char, chdir, chroot, fork, getpwnam, getuid, setgid, setsid, setuid, umask, pipe2, c_int, O_DIRECT, close};
+use libc::{c_char, chdir, chroot, fork, getpwnam, getuid, setgid, setsid, setuid, umask, pipe2, c_int, O_DIRECT, close, prctl, PR_SET_PDEATHSIG, SIGHUP, SIGTERM};
 use spin::Mutex;
 use crate::agent::agent::agent_worker;
 use crate::agent::ipc::IPC;
@@ -114,6 +114,8 @@ pub fn start_crypto_agent<>() -> Result<Arc<Mutex<IPC>>, DaemonizeError> {
             unsafe {
                 close(client_to_agent[0]);
                 close(agent_to_client[1]);
+
+                prctl(PR_SET_PDEATHSIG, SIGHUP);
 
                 Ok(Arc::new(Mutex::new(IPC {
                     writer: File::from_raw_fd(client_to_agent[1]),

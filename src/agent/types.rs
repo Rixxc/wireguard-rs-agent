@@ -6,6 +6,12 @@ use crate::wireguard::handshake::types::{HandshakeError, Psk};
 
 const TIME_BETWEEN_INITIATIONS: Duration = Duration::from_millis(20);
 
+#[derive(Debug)]
+pub enum IPCError {
+    InvalidRequest,
+    AgentError
+}
+
 pub struct Peer {
     pub macs: macs::Generator,
     pub ss: [u8; 32], // precomputed DH(static, static)

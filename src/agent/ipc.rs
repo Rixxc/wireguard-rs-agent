@@ -47,7 +47,8 @@ pub struct ConsumeInitiatorResponse {
     pub eph_r_pk: [u8; 32],
     pub hs: [u8; 32],
     pub ck: [u8; 32],
-    pub peer_pk: [u8; 32]
+    pub peer_pk: [u8; 32],
+    pub ts: [u8; 12]
 }
 
 #[repr(packed)]
@@ -95,7 +96,8 @@ impl IPC {
                         eph_r_pk: resp.2.1.to_bytes(),
                         hs: resp.2.2.try_into().unwrap(),
                         ck: resp.2.3.try_into().unwrap(),
-                        peer_pk: resp.1.to_bytes()
+                        peer_pk: resp.1.to_bytes(),
+                        ts: resp.3.try_into().unwrap()
                     }.as_bytes()).unwrap();
                 } else {
                     self.writer.write(ConsumeInitiatorResponse {
@@ -104,7 +106,8 @@ impl IPC {
                         eph_r_pk: [0u8; 32],
                         hs: [0u8; 32],
                         ck: [0u8; 32],
-                        peer_pk: [0u8; 32]
+                        peer_pk: [0u8; 32],
+                        ts: [0u8; 12]
                     }.as_bytes()).unwrap();
 
                     self.writer.flush().unwrap();

@@ -14,6 +14,7 @@ use rand::Rng;
 use rand_core::{CryptoRng, RngCore};
 
 use clear_on_drop::clear::Clear;
+use generic_array::GenericArray;
 use subtle::ConstantTimeEq;
 
 use x25519_dalek::PublicKey;
@@ -22,6 +23,7 @@ use crate::agent::ipc::{ConsumeInitiator, ConsumeInitiatorResponse, ConsumeRespo
 use crate::platform;
 use crate::wireguard::handshake::noise::TemporaryState;
 use crate::wireguard::handshake::peer::State;
+use crate::wireguard::handshake::timestamp::TAI64N;
 use crate::wireguard::types::KeyPair;
 use crate::wireguard::WireGuard;
 use crate::wireguard::types::Key;
@@ -382,6 +384,10 @@ impl<O> Device<O> {
                 let peer = self.pk_map.get(&resp.peer_pk).unwrap();
                 let pk = PublicKey::from(resp.peer_pk);
                 let st: TemporaryState = (resp.receiver, PublicKey::from(resp.eph_r_pk), resp.hs.into(), resp.ck.into());
+                let ts = TAI64N::from(GenericArray::from(resp.ts));
+
+                *peer.state.lock() = State::Reset;
+                peer.check_replay_flood(&self,&ts)?;
 
                 // allocate new index for response
                 let local = self.allocate(rng, &pk);

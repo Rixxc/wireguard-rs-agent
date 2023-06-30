@@ -34,7 +34,6 @@ pub(super) struct Peer<O> {
     pub macs: Mutex<macs::Generator>,
 
     // constant state
-    pub ss: [u8; 32], // precomputed DH(static, static)
     pub psk: Psk,     // psk of peer
 }
 
@@ -59,14 +58,13 @@ impl Drop for State {
 }
 
 impl<O> Peer<O> {
-    pub fn new(pk: PublicKey, ss: [u8; 32], opaque: O) -> Self {
+    pub fn new(pk: PublicKey, opaque: O) -> Self {
         Self {
             opaque,
             macs: Mutex::new(macs::Generator::new(pk)),
             state: Mutex::new(State::Reset),
             timestamp: Mutex::new(None),
             last_initiation_consumption: Mutex::new(None),
-            ss,
             psk: [0u8; 32],
         }
     }

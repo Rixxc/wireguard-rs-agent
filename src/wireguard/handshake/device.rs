@@ -39,9 +39,8 @@ use super::types::*;
 const MAX_PEER_PER_DEVICE: usize = 1 << 20;
 
 pub struct KeyState {
-    pub(crate) sk: StaticSecret, // static secret key
-    pub(crate) pk: PublicKey,    // static public key
-    pub(crate) macs: macs::Validator,       // validator for the mac fields
+    pub pk: PublicKey,    // static public key
+    pub macs: macs::Validator,       // validator for the mac fields
 }
 
 /// The device is generic over an "opaque" type
@@ -115,65 +114,17 @@ impl<O> Device<O> {
         }
     }
 
-    fn update_ss(&mut self) -> (Vec<u32>, Option<PublicKey>) {
-        let mut same = None;
-        let mut ids = Vec::with_capacity(self.pk_map.len());
-        for (pk, peer) in self.pk_map.iter_mut() {
-            if let Some(key) = self.keyst.as_ref() {
-                if key.pk.as_bytes() == pk {
-                    same = Some(PublicKey::from(*pk));
-                    peer.ss.clear()
-                } else {
-                    let pk = PublicKey::from(*pk);
-                    peer.ss = *key.sk.diffie_hellman(&pk).as_bytes();
-                }
-            } else {
-                peer.ss.clear();
-            }
-            if let Some(id) = peer.reset_state() {
-                ids.push(id)
-            }
-        }
-
-        (ids, same)
-    }
-
-    /// Update the secret key of the device
-    ///
-    /// # Arguments
-    ///
-    /// * `sk` - x25519 scalar representing the local private key
-    pub fn set_sk(&mut self, sk: Option<StaticSecret>) -> Option<PublicKey> {
-        // update secret and public key
-        self.keyst = sk.map(|sk| {
-            let pk = PublicKey::from(&sk);
-            let macs = macs::Validator::new(pk);
-            KeyState { pk, sk, macs }
-        });
-
-        // recalculate / erase the shared secrets for every peer
-        let (ids, same) = self.update_ss();
-
-        // release ids from aborted handshakes
-        for id in ids {
-            self.release(id)
-        }
-
-        // if we found a peer matching the device public key
-        // remove it and return its value to the caller
-        same.map(|pk| {
-            self.pk_map.remove(pk.as_bytes());
-            pk
-        })
-    }
-
     /// Return the secret key of the device
     ///
     /// # Returns
     ///
     /// A secret key (x25519 scalar)
     pub fn get_sk(&self) -> Option<&StaticSecret> {
-        self.keyst.as_ref().map(|key| &key.sk)
+        None
+    }
+
+    pub fn set_public_key(&mut self, pubkey: PublicKey) {
+        self.keyst = Some(KeyState { pk: pubkey, macs: macs::Validator::new(pubkey) });
     }
 
     /// Add a new public key to the state machine
@@ -201,10 +152,6 @@ impl<O> Device<O> {
             *pk.as_bytes(),
             Peer::new(
                 pk,
-                self.keyst
-                    .as_ref()
-                    .map(|key| *key.sk.diffie_hellman(&pk).as_bytes())
-                    .unwrap_or([0u8; 32]),
                 opaque,
             ),
         );

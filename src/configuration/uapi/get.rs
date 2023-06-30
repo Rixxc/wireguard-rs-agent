@@ -14,9 +14,6 @@ pub fn serialize<C: Configuration, W: io::Write>(writer: &mut W, config: &C) -> 
     };
 
     // serialize interface
-    config
-        .get_private_key()
-        .map(|sk| write("private_key", hex::encode(sk.to_bytes())));
 
     config
         .get_listen_port()

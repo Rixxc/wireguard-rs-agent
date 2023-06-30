@@ -121,14 +121,7 @@ impl<'a, C: Configuration> LineParser<'a, C> {
                 // opt: set private key
                 "private_key" => match <[u8; 32]>::from_hex(value) {
                     Ok(sk) => {
-                        self.config.set_private_key(if sk.ct_eq(&[0u8; 32]).into() {
-                            None
-                        } else {
-                            let pk = SetPrivateKey { request_type: 0, private_key: sk };
-                            self.config.perform_ipc_call(&pk.as_bytes());
-
-                            Some(StaticSecret::from(sk))
-                        });
+                        log::debug!("{}", value);
                         Ok(())
                     }
                     Err(_) => Err(ConfigError::InvalidHexValue),

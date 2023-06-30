@@ -72,20 +72,6 @@ pub trait Configuration {
 
     fn down(&self);
 
-    /// Updates the private key of the device
-    ///
-    /// # Arguments
-    ///
-    /// - `sk`: The new private key (or None, if the private key should be cleared)
-    fn set_private_key(&self, sk: Option<StaticSecret>);
-
-    /// Returns the private key of the device
-    ///
-    /// # Returns
-    ///
-    /// The private if set, otherwise None.
-    fn get_private_key(&self) -> Option<StaticSecret>;
-
     /// Returns the protocol version of the device
     ///
     /// # Returns
@@ -258,15 +244,6 @@ impl<T: tun::Tun, B: udp::PlatformUDP> Configuration for WireGuardConfig<T, B> {
         let mut cfg = self.lock();
         cfg.wireguard.down();
         cfg.bind = None;
-    }
-
-    fn set_private_key(&self, sk: Option<StaticSecret>) {
-        log::info!("configuration, set private key");
-        self.lock().wireguard.set_key(sk)
-    }
-
-    fn get_private_key(&self) -> Option<StaticSecret> {
-        self.lock().wireguard.get_sk()
     }
 
     fn get_protocol_version(&self) -> usize {

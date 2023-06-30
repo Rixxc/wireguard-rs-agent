@@ -186,19 +186,6 @@ impl<T: Tun, B: UDP> WireGuard<T, B> {
         let _ = self.peers.write().remove(pk);
     }
 
-    pub fn set_key(&self, sk: Option<StaticSecret>) {
-        let mut peers = self.peers.write();
-        peers.set_sk(sk);
-        self.router.clear_sending_keys();
-    }
-
-    pub fn get_sk(&self) -> Option<StaticSecret> {
-        self.peers
-            .read()
-            .get_sk()
-            .map(|sk| StaticSecret::from(sk.to_bytes()))
-    }
-
     pub fn set_psk(&self, pk: PublicKey, psk: [u8; 32]) -> bool {
         self.peers.write().set_psk(pk, psk).is_ok()
     }

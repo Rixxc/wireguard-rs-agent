@@ -5,6 +5,7 @@ extern crate alloc;
 #[cfg(feature = "profiler")]
 extern crate cpuprofiler;
 
+use std::convert::TryInto;
 #[cfg(feature = "profiler")]
 use cpuprofiler::PROFILER;
 
@@ -16,8 +17,10 @@ mod agent;
 mod util;
 
 use std::env;
+use std::io::Read;
 use std::process::exit;
 use std::thread;
+use x25519_dalek::PublicKey;
 
 use configuration::Configuration;
 
@@ -135,8 +138,15 @@ fn main() {
     #[cfg(feature = "profiler")]
     profiler_start(name.as_str());
 
+    // wait for crypto agent to provide public key
+    let mut buf = [0u8; 32];
+    let size = ipc.lock().reader.read(&mut buf).unwrap();
+
+    let public_key = PublicKey::from(buf);
+
     // create WireGuard device
     let wg: WireGuard<plt::Tun, plt::UDP> = WireGuard::new(writer, ipc);
+    wg.peers.write().set_public_key(public_key);
 
     // add all Tun readers
     while let Some(reader) = readers.pop() {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use spin::Mutex;
 use std::time::{Duration, Instant};
+use x25519_dalek::{PublicKey, StaticSecret};
 use crate::wireguard::handshake::{macs, timestamp};
 use crate::wireguard::handshake::types::{HandshakeError, Psk};
 
@@ -18,8 +19,14 @@ pub struct Peer {
     pub psk: Psk,     // psk of peer
 }
 
+pub struct KeyState {
+    pub sk: StaticSecret, // static secret key
+    pub pk: PublicKey,    // static public key
+    pub macs: macs::Validator,       // validator for the mac fields
+}
+
 pub struct State {
-    pub keyst: Option<crate::wireguard::handshake::device::KeyState>,
+    pub keyst: Option<KeyState>,
     pub pk_map: HashMap<[u8; 32], Peer>
 }
 

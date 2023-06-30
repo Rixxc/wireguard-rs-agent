@@ -19,7 +19,7 @@ use subtle::ConstantTimeEq;
 
 use x25519_dalek::PublicKey;
 use x25519_dalek::StaticSecret;
-use crate::agent::ipc::{ConsumeInitiator, ConsumeInitiatorResponse, ConsumeResponse, ConsumeResponseResponse, IPC};
+use crate::agent::ipc::{ConsumeInitiator, ConsumeInitiatorResponse, ConsumeResponse, ConsumeResponseResponse, CreateInitiation, CreateInitiationResponse, IPC};
 use crate::platform;
 use crate::wireguard::handshake::noise::TemporaryState;
 use crate::wireguard::handshake::peer::State;
@@ -287,20 +287,43 @@ impl<O> Device<O> {
     /// # Arguments
     ///
     /// * `pk` - Public key of peer to initiate handshake for
-    pub fn begin<R: RngCore + CryptoRng>(
+    pub fn begin<R: RngCore + CryptoRng, T: platform::tun::Tun, B: platform::udp::UDP>(
         &self,
         rng: &mut R,
         pk: &PublicKey,
+        wg: &WireGuard<T, B>
     ) -> Result<Vec<u8>, HandshakeError> {
         match (self.keyst.as_ref(), self.pk_map.get(pk.as_bytes())) {
             (_, None) => Err(HandshakeError::UnknownPublicKey),
             (None, _) => Err(HandshakeError::UnknownPublicKey),
             (Some(keyst), Some(peer)) => {
                 let local = self.allocate(rng, pk);
-                let mut msg = Initiation::default();
+                //let mut msg = Initiation::default();
 
                 // create noise part of initation
-                noise::create_initiation(rng, keyst, peer, pk, local, &mut msg.noise)?;
+                //noise::create_initiation(rng, keyst, peer, pk, local, &mut msg.noise)?;
+
+                let (size, data) = wg.perform_ipc_call_and_get_response(CreateInitiation {
+                    request_type: 4,
+                    pk: pk.to_bytes(),
+                    local
+                }.as_bytes());
+
+                let resp: LayoutVerified<&[u8], CreateInitiationResponse> = LayoutVerified::new(&data[..size]).unwrap();
+
+                if resp.error != 0 {
+                    return Err(HandshakeError::InvalidSharedSecret);
+                }
+
+                // update state of peer
+                *peer.state.lock() = State::InitiationSent {
+                    hs: resp.hs.into(),
+                    ck: resp.ck.into(),
+                    eph_sk: resp.eph_sk.into(),
+                    local
+                };
+
+                let mut msg = resp.msg;
 
                 // add macs to initation
                 peer.macs

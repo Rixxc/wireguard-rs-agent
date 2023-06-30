@@ -6,7 +6,7 @@ use std::ops::Deref;
 use generic_array::GenericArray;
 use crate::agent::types::{IPCError, Peer, State};
 use zerocopy::{AsBytes, FromBytes, LayoutVerified};
-use crate::agent::actions::{consume_initiator, consume_response, register_public_key, set_private_key, TemporaryState};
+use crate::agent::actions::{consume_initiator, consume_response, create_initiation, register_public_key, set_private_key, TemporaryState};
 use crate::wireguard::handshake::messages::{Initiation, Response};
 use x25519_dalek::PublicKey;
 use digest::consts::U32;
@@ -70,6 +70,24 @@ pub struct ConsumeResponseResponse {
     pub key_recv: [u8; 32]
 }
 
+#[repr(packed)]
+#[derive(FromBytes, AsBytes)]
+pub struct CreateInitiation {
+    pub request_type: u8,
+    pub pk: [u8; 32],
+    pub local: u32
+}
+
+#[repr(packed)]
+#[derive(FromBytes, AsBytes)]
+pub struct CreateInitiationResponse {
+    pub error: u8,
+    pub msg: Initiation,
+    pub hs: [u8; 32],
+    pub ck: [u8; 32],
+    pub eph_sk: [u8; 32]
+}
+
 impl IPC {
     pub fn handle_ipc_request(self: &mut Self, state: &mut State) -> Result<(), IPCError> {
         let mut data = [0u8; 400];
@@ -116,9 +134,7 @@ impl IPC {
                 }
             }
             3 => {
-                log::debug!("before parsing");
                 let response: LayoutVerified<&[u8], ConsumeResponse> = LayoutVerified::new(&data[..size]).unwrap();
-                log::debug!("after parsing");
                 let resp = consume_response(&response, state);
 
                 if let Ok(resp) = resp {
@@ -138,6 +154,18 @@ impl IPC {
 
                     return Err(IPCError::InvalidRequest)
                 }
+            }
+            4 => {
+                let initiation: LayoutVerified<&[u8], CreateInitiation> = LayoutVerified::new(&data[..size]).unwrap();
+                let resp = create_initiation(initiation.pk, initiation.local, state).unwrap_or(CreateInitiationResponse {
+                    error: 1,
+                    msg: Initiation::default(),
+                    eph_sk: [0u8; 32],
+                    ck: [0u8; 32],
+                    hs: [0u8; 32],
+                });
+
+                self.writer.write(resp.as_bytes()).unwrap();
             }
             _ => log::error!("Invalid request to crypto agent: {:?}", &data[..size])
         };

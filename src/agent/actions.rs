@@ -1,23 +1,27 @@
 use std::time::Instant;
+
+use aead::{Aead, NewAead, Payload};
 use blake2::Blake2s;
-use clear_on_drop::clear_stack_on_return_fnonce;
-use generic_array::GenericArray;
-use hmac::Hmac;
-use x25519_dalek::{PublicKey, StaticSecret};
-use crate::agent::ipc::{ConsumeResponse, RegisterPublicKey};
-use crate::agent::types::{Peer, State};
-use crate::wireguard::handshake::device::KeyState;
-use crate::wireguard::handshake::{macs, timestamp};
-use crate::wireguard::handshake::messages::{NoiseInitiation, NoiseResponse};
-use crate::wireguard::handshake::types::HandshakeError;
-use crate::wireguard::handshake::noise::shared_secret;
 use chacha20poly1305::ChaCha20Poly1305;
 use clear_on_drop::clear::Clear;
-use aead::{Payload, NewAead, Aead};
+use clear_on_drop::clear_stack_on_return_fnonce;
 use digest::consts::U32;
+use generic_array::GenericArray;
+use hmac::Hmac;
+use rand::rngs::OsRng;
 use spin::Mutex;
 use subtle::ConstantTimeEq;
+use x25519_dalek::{PublicKey, StaticSecret};
+use zerocopy::AsBytes;
+
+use crate::agent::ipc::{ConsumeResponse, CreateInitiationResponse, RegisterPublicKey};
+use crate::agent::types::{Peer, State};
+use crate::agent::types::KeyState;
+use crate::wireguard::handshake::{macs, timestamp, TYPE_INITIATION};
+use crate::wireguard::handshake::messages::{Initiation, NoiseInitiation, NoiseResponse};
+use crate::wireguard::handshake::noise::shared_secret;
 use crate::wireguard::handshake::timestamp::TAI64N;
+use crate::wireguard::handshake::types::HandshakeError;
 
 // HMAC hasher (generic construction)
 
@@ -229,14 +233,14 @@ pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Res
     })
 }
 
-pub fn consume_response<'a>(resp: &ConsumeResponse, state: &'a mut State) -> Result<(GenericArray<u8, U32>, GenericArray<u8, U32>), HandshakeError> {
+pub fn consume_response(
+    resp: &ConsumeResponse,
+    state: &mut State
+) -> Result<(GenericArray<u8, U32>, GenericArray<u8, U32>), HandshakeError> {
     clear_stack_on_return_fnonce(CLEAR_PAGES, || {
         // retrieve peer and copy initiation state
         let peer = state.pk_map.get(&resp.peer_pk).ok_or(HandshakeError::UnknownPublicKey)?;
-        log::debug!("After peer");
         let keyst = state.keyst.as_ref().unwrap();
-
-        log::debug!("After keyst");
 
         // C := Kdf1(C, E_pub)
 
@@ -250,12 +254,10 @@ pub fn consume_response<'a>(resp: &ConsumeResponse, state: &'a mut State) -> Res
 
         let eph_r_pk = PublicKey::from(resp.response.noise.f_ephemeral);
         let ck = KDF1!(&ck, shared_secret(&StaticSecret::from(resp.eph_sk), &eph_r_pk)?.as_bytes());
-        log::debug!("After first dh");
 
         // C := Kdf1(C, DH(E_priv, S_pub))
 
         let ck = KDF1!(&ck, shared_secret(&keyst.sk, &eph_r_pk)?.as_bytes());
-        log::debug!("after second dh");
 
         // (C, tau, k) := Kdf3(C, Q)
 
@@ -278,5 +280,90 @@ pub fn consume_response<'a>(resp: &ConsumeResponse, state: &'a mut State) -> Res
         let (key_send, key_recv) = KDF2!(&ck, &[]);
 
         Ok((key_send, key_recv))
+    })
+}
+
+pub(super) fn create_initiation(
+    pk: [u8; 32],
+    local: u32,
+    state: &mut State
+) -> Result<CreateInitiationResponse, HandshakeError> {
+    log::debug!("create initiation");
+    clear_stack_on_return_fnonce(CLEAR_PAGES, || {
+        let peer = state.pk_map.get(&pk).ok_or(HandshakeError::UnknownPublicKey)?;
+
+        // check for zero shared-secret (see "shared_secret" note).
+        if peer.ss.ct_eq(&[0u8; 32]).into() {
+            return Err(HandshakeError::InvalidSharedSecret);
+        }
+
+        let mut msg = Initiation::default();
+        // initialize state
+
+        let ck = INITIAL_CK;
+        let hs = INITIAL_HS;
+        let hs = HASH!(&hs, pk.as_bytes());
+
+        msg.noise.f_type.set(TYPE_INITIATION as u32);
+        msg.noise.f_sender.set(local); // from us
+
+        // (E_priv, E_pub) := DH-Generate()
+
+        let eph_sk = StaticSecret::new(OsRng);
+        let eph_pk = PublicKey::from(&eph_sk);
+
+        // C := Kdf(C, E_pub)
+
+        let ck = KDF1!(&ck, eph_pk.as_bytes());
+
+        // msg.ephemeral := E_pub
+
+        msg.noise.f_ephemeral = *eph_pk.as_bytes();
+
+        // H := HASH(H, msg.ephemeral)
+
+        let hs = HASH!(&hs, msg.noise.f_ephemeral);
+
+        // (C, k) := Kdf2(C, DH(E_priv, S_pub))
+
+        let (ck, key) = KDF2!(&ck, shared_secret(&eph_sk, &PublicKey::from(pk))?.as_bytes());
+
+        // msg.static := Aead(k, 0, S_pub, H)
+
+        SEAL!(
+            &key,
+            &hs,                 // ad
+            state.keyst.as_ref().ok_or(HandshakeError::InvalidSharedSecret)?.pk.as_bytes(), // pt
+            &mut msg.noise.f_static    // ct || tag
+        );
+
+        // H := Hash(H || msg.static)
+
+        let hs = HASH!(&hs, &msg.noise.f_static[..]);
+
+        // (C, k) := Kdf2(C, DH(S_priv, S_pub))
+
+        let (ck, key) = KDF2!(&ck, &peer.ss);
+
+        // msg.timestamp := Aead(k, 0, Timestamp(), H)
+
+        SEAL!(
+            &key,
+            &hs,                  // ad
+            &timestamp::now(),    // pt
+            &mut msg.noise.f_timestamp  // ct || tag
+        );
+
+        // H := Hash(H || msg.timestamp)
+
+        let hs = HASH!(&hs, &msg.noise.f_timestamp);
+
+        Ok(CreateInitiationResponse {
+            error: 0,
+            msg,
+            hs: hs.into(),
+            ck: ck.into(),
+            eph_sk: eph_sk.to_bytes()
+        })
     })
 }

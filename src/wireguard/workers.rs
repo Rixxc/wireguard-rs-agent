@@ -255,7 +255,7 @@ pub fn handshake_worker<T: Tun, B: UDP>(
                         wg, peer
                     );
                     let device = wg.peers.read();
-                    let _ = device.begin(&mut OsRng, &pk).map(|msg| {
+                    let _ = device.begin(&mut OsRng, &pk, wg).map(|msg| {
                         let _ = peer.send_raw(&msg[..]).map_err(|e| {
                             debug!("{} : handshake worker, failed to send handshake initiation, error = {}", wg, e)
                         });

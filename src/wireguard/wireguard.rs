@@ -312,12 +312,12 @@ impl<T: Tun, B: UDP> WireGuard<T, B> {
         ipc.writer.flush().unwrap();
     }
 
-    pub fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> (usize, [u8; 200]) {
+    pub fn perform_ipc_call_and_get_response(&self, msg: &[u8]) -> (usize, [u8; 400]) {
         let mut ipc = self.ipc.lock();
         ipc.writer.write(msg).unwrap();
         ipc.writer.flush().unwrap();
 
-        let mut resp = [0u8; 200];
+        let mut resp = [0u8; 400];
         let size = ipc.reader.read(&mut resp).unwrap();
         return (size, resp);
     }

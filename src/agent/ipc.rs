@@ -3,13 +3,15 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::ops::Deref;
-use generic_array::GenericArray;
-use crate::agent::types::{IPCError, Peer, State};
-use zerocopy::{AsBytes, FromBytes, LayoutVerified};
-use crate::agent::actions::{consume_initiator, consume_response, create_initiation, register_public_key, set_private_key, TemporaryState};
-use crate::wireguard::handshake::messages::{Initiation, Response};
-use x25519_dalek::PublicKey;
+
 use digest::consts::U32;
+use generic_array::GenericArray;
+use x25519_dalek::PublicKey;
+use zerocopy::{AsBytes, FromBytes, LayoutVerified};
+
+use crate::agent::actions::{consume_initiator, consume_response, create_initiation, register_public_key, set_private_key, TemporaryState};
+use crate::agent::types::{IPCError, Peer, State};
+use crate::wireguard::handshake::messages::{Initiation, Response};
 use crate::wireguard::handshake::types::HandshakeError;
 
 pub struct IPC {
@@ -105,55 +107,29 @@ impl IPC {
             }
             2 => {
                 let initiator: LayoutVerified<&[u8], ConsumeInitiator> = LayoutVerified::new(&data[..size]).ok_or(IPCError::InvalidRequest)?;
-                let resp = consume_initiator(&initiator.initiation.noise, state);
+                let resp = consume_initiator(&initiator.initiation.noise, state).unwrap_or(ConsumeInitiatorResponse {
+                    error: 1,
+                    receiver: 0,
+                    eph_r_pk: [0u8; 32],
+                    hs: [0u8; 32],
+                    ck: [0u8; 32],
+                    peer_pk: [0u8; 32],
+                    ts: [0u8; 12]
+                });
 
-                if let Ok(resp) = resp {
-                    self.writer.write(ConsumeInitiatorResponse {
-                        error: 0,
-                        receiver: resp.2.0,
-                        eph_r_pk: resp.2.1.to_bytes(),
-                        hs: resp.2.2.try_into().unwrap(),
-                        ck: resp.2.3.try_into().unwrap(),
-                        peer_pk: resp.1.to_bytes(),
-                        ts: resp.3.try_into().unwrap()
-                    }.as_bytes()).unwrap();
-                } else {
-                    self.writer.write(ConsumeInitiatorResponse {
-                        error: 1,
-                        receiver: 0,
-                        eph_r_pk: [0u8; 32],
-                        hs: [0u8; 32],
-                        ck: [0u8; 32],
-                        peer_pk: [0u8; 32],
-                        ts: [0u8; 12]
-                    }.as_bytes()).unwrap();
-
-                    self.writer.flush().unwrap();
-
-                    return Err(IPCError::InvalidRequest)
-                }
+                self.writer.write(resp.as_bytes()).unwrap();
+                self.writer.flush().unwrap();
             }
             3 => {
                 let response: LayoutVerified<&[u8], ConsumeResponse> = LayoutVerified::new(&data[..size]).unwrap();
-                let resp = consume_response(&response, state);
+                let resp = consume_response(&response, state).unwrap_or(ConsumeResponseResponse {
+                    error: 1,
+                    key_send: [0u8; 32],
+                    key_recv: [0u8; 32]
+                });
 
-                if let Ok(resp) = resp {
-                    self.writer.write(ConsumeResponseResponse {
-                        error: 0,
-                        key_send: resp.0.try_into().unwrap(),
-                        key_recv: resp.1.try_into().unwrap()
-                    }.as_bytes()).unwrap();
-                } else {
-                    self.writer.write(ConsumeResponseResponse {
-                        error: 1,
-                        key_send: [0u8; 32],
-                        key_recv: [0u8; 32]
-                    }.as_bytes()).unwrap();
-
-                    self.writer.flush().unwrap();
-
-                    return Err(IPCError::InvalidRequest)
-                }
+                self.writer.write(resp.as_bytes()).unwrap();
+                self.writer.flush().unwrap();
             }
             4 => {
                 let initiation: LayoutVerified<&[u8], CreateInitiation> = LayoutVerified::new(&data[..size]).unwrap();

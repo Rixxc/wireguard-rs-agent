@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::time::Instant;
 
 use aead::{Aead, NewAead, Payload};
@@ -14,7 +15,7 @@ use subtle::ConstantTimeEq;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zerocopy::AsBytes;
 
-use crate::agent::ipc::{ConsumeResponse, CreateInitiationResponse, RegisterPublicKey};
+use crate::agent::ipc::{ConsumeInitiatorResponse, ConsumeResponse, ConsumeResponseResponse, CreateInitiationResponse, RegisterPublicKey};
 use crate::agent::types::{Peer, State};
 use crate::agent::types::KeyState;
 use crate::wireguard::handshake::{macs, timestamp, TYPE_INITIATION};
@@ -149,7 +150,7 @@ pub fn register_public_key(public_key: &RegisterPublicKey, state: &mut State) {
     });
 }
 
-pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Result<(&'a Peer, PublicKey, TemporaryState, TAI64N), HandshakeError> {
+pub fn consume_initiator(msg: &NoiseInitiation, state: &mut State) -> Result<ConsumeInitiatorResponse, HandshakeError> {
     clear_stack_on_return_fnonce(CLEAR_PAGES, move || {
         // initialize new state
         let keyst = state.keyst.as_ref().unwrap();
@@ -224,19 +225,22 @@ pub fn consume_initiator<'a>(msg: &NoiseInitiation, state: &'a mut State) -> Res
 
         // return state (to create response)
 
-        Ok((
-            peer,
-            PublicKey::from(pk),
-            (msg.f_sender.get(), eph_r_pk, hs, ck),
-            ts
-        ))
+        Ok(ConsumeInitiatorResponse {
+            error: 0,
+            receiver: msg.f_sender.get(),
+            eph_r_pk: *eph_r_pk.as_bytes(),
+            hs: hs.try_into().unwrap(),
+            ck: ck.try_into().unwrap(),
+            peer_pk: pk,
+            ts: ts.try_into().unwrap()
+        })
     })
 }
 
 pub fn consume_response(
     resp: &ConsumeResponse,
     state: &mut State
-) -> Result<(GenericArray<u8, U32>, GenericArray<u8, U32>), HandshakeError> {
+) -> Result<ConsumeResponseResponse, HandshakeError> {
     clear_stack_on_return_fnonce(CLEAR_PAGES, || {
         // retrieve peer and copy initiation state
         let peer = state.pk_map.get(&resp.peer_pk).ok_or(HandshakeError::UnknownPublicKey)?;
@@ -279,7 +283,11 @@ pub fn consume_response(
         // derive key-pair
         let (key_send, key_recv) = KDF2!(&ck, &[]);
 
-        Ok((key_send, key_recv))
+        Ok(ConsumeResponseResponse {
+            error: 0,
+            key_send: key_send.try_into().unwrap(),
+            key_recv: key_recv.try_into().unwrap()
+        })
     })
 }
 

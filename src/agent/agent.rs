@@ -1,7 +1,9 @@
 use std::convert::TryInto;
 use std::fs;
 use std::io::Write;
+
 use x25519_dalek::{PublicKey, StaticSecret};
+
 use crate::agent::ipc::IPC;
 use crate::agent::types::{KeyState, State};
 use crate::wireguard::handshake::macs;

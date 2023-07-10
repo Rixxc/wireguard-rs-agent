@@ -1,7 +1,9 @@
 use std::collections::HashMap;
-use spin::Mutex;
 use std::time::{Duration, Instant};
+
+use spin::Mutex;
 use x25519_dalek::{PublicKey, StaticSecret};
+
 use crate::wireguard::handshake::{macs, timestamp};
 use crate::wireguard::handshake::types::{HandshakeError, Psk};
 

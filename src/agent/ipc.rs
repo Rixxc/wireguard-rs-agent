@@ -118,10 +118,9 @@ impl IPC {
                 });
 
                 self.writer.write(resp.as_bytes()).unwrap();
-                self.writer.flush().unwrap();
             }
             3 => {
-                let response: LayoutVerified<&[u8], ConsumeResponse> = LayoutVerified::new(&data[..size]).unwrap();
+                let response: LayoutVerified<&[u8], ConsumeResponse> = LayoutVerified::new(&data[..size]).ok_or(IPCError::InvalidRequest)?;
                 let resp = consume_response(&response, state).unwrap_or(ConsumeResponseResponse {
                     error: 1,
                     key_send: [0u8; 32],
@@ -129,10 +128,9 @@ impl IPC {
                 });
 
                 self.writer.write(resp.as_bytes()).unwrap();
-                self.writer.flush().unwrap();
             }
             4 => {
-                let initiation: LayoutVerified<&[u8], CreateInitiation> = LayoutVerified::new(&data[..size]).unwrap();
+                let initiation: LayoutVerified<&[u8], CreateInitiation> = LayoutVerified::new(&data[..size]).ok_or(IPCError::InvalidRequest)?;
                 let resp = create_initiation(initiation.pk, initiation.local, state).unwrap_or(CreateInitiationResponse {
                     error: 1,
                     msg: Initiation::default(),

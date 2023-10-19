@@ -1,11 +1,14 @@
 use std::cmp::Ordering;
-use std::fmt;
+use std::{fmt, ptr};
 use std::fs::File;
 use std::os::fd::FromRawFd;
-use std::process::exit;
+use std::process::{exit, Stdio};
 use std::sync::Arc;
+use std::process::Command;
+use std::os::unix::process::CommandExt;
+use arraydeque::Array;
 
-use libc::{c_char, chdir, chroot, fork, getpwnam, getuid, setgid, setsid, setuid, umask, pipe2, c_int, O_DIRECT, close, prctl, PR_SET_PDEATHSIG, SIGHUP, SIGTERM};
+use libc::{c_char, chdir, chroot, fork, getpwnam, getuid, setgid, setsid, setuid, umask, pipe2, c_int, O_DIRECT, close, prctl, PR_SET_PDEATHSIG, SIGHUP, SIGTERM, execve, getpid, perror};
 use spin::Mutex;
 use crate::agent::agent::agent_worker;
 use crate::agent::ipc::IPC;
@@ -129,6 +132,19 @@ pub fn start_crypto_agent<>() -> Result<Arc<Mutex<IPC>>, DaemonizeError> {
                 close(client_to_agent[1]);
                 close(agent_to_client[0]);
 
+                println!("PID: {}", getpid());
+                println!("writer: {} reader: {}", agent_to_client[1], client_to_agent[0]);
+                assert_eq!(agent_to_client[1], 6);
+                assert_eq!(client_to_agent[0], 3);
+
+                let err = Command::new("/home/rixxc/Projekte/MPI/Wireguard/jasmin-agent/agent")
+                    .current_dir("/home/rixxc/Projekte/MPI/Wireguard/jasmin-agent")
+                    .stdout(Stdio::inherit())
+                    .exec();
+                println!("Error: {}", err);
+
+                exit(1);
+
                 agent_worker(IPC {
                     writer: File::from_raw_fd(agent_to_client[1]),
                     reader: File::from_raw_fd(client_to_agent[0])
@@ -142,3 +158,4 @@ pub fn start_crypto_agent<>() -> Result<Arc<Mutex<IPC>>, DaemonizeError> {
         },
     }
 }
+

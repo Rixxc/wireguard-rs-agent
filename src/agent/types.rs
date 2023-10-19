@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use spin::Mutex;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use crate::wireguard::handshake::{macs, timestamp};
-use crate::wireguard::handshake::types::{HandshakeError, Psk};
+use crate::wireguard::handshake::types::Psk;
 
 const TIME_BETWEEN_INITIATIONS: Duration = Duration::from_millis(20);
 
@@ -16,7 +14,6 @@ pub enum IPCError {
 }
 
 pub struct Peer {
-    pub macs: macs::Generator,
     pub ss: [u8; 32], // precomputed DH(static, static)
     pub psk: Psk,     // psk of peer
 }
@@ -24,7 +21,6 @@ pub struct Peer {
 pub struct KeyState {
     pub sk: StaticSecret, // static secret key
     pub pk: PublicKey,    // static public key
-    pub macs: macs::Validator,       // validator for the mac fields
 }
 
 pub struct State {

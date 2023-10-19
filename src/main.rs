@@ -20,6 +20,7 @@ use std::env;
 use std::io::Read;
 use std::process::exit;
 use std::thread;
+use log::LevelFilter;
 use x25519_dalek::PublicKey;
 
 use configuration::Configuration;
@@ -78,6 +79,12 @@ fn main() {
         }
     }
 
+    // create crypto agent
+    let ipc = start_crypto_agent().unwrap_or_else(|e| {
+        eprintln!("Failed to start crypto agent: {}", e);
+        exit(-6);
+    });
+
     // unwrap device name
     let name = match name {
         None => {
@@ -87,22 +94,16 @@ fn main() {
         Some(name) => name,
     };
 
-    // create UAPI socket
-    let uapi = plt::UAPI::bind(name.as_str()).unwrap_or_else(|e| {
-        eprintln!("Failed to create UAPI listener: {}", e);
-        exit(-2);
-    });
-
     // create TUN device
     let (mut readers, writer, status) = plt::Tun::create(name.as_str()).unwrap_or_else(|e| {
         eprintln!("Failed to create TUN device: {}", e);
         exit(-3);
     });
 
-    // create crypto agent
-    let ipc = start_crypto_agent().unwrap_or_else(|e| {
-        eprintln!("Failed to start crypto agent: {}", e);
-        exit(-6);
+    // create UAPI socket
+    let uapi = plt::UAPI::bind(name.as_str()).unwrap_or_else(|e| {
+        eprintln!("Failed to create UAPI listener: {}", e);
+        exit(-2);
     });
 
     // drop privileges
@@ -139,8 +140,12 @@ fn main() {
     profiler_start(name.as_str());
 
     // wait for crypto agent to provide public key
+    log::debug!("Waiting for crypto agent to provide public key");
     let mut buf = [0u8; 32];
     let size = ipc.lock().reader.read(&mut buf).unwrap();
+    assert_eq!(size, 32);
+
+    log::debug!("Received public key: {:x?}", &buf);
 
     let public_key = PublicKey::from(buf);
 

@@ -23,7 +23,7 @@ pub fn agent_worker(mut ipc: IPC) {
     state.keyst = private_key.map(|sk| {
         let pk = PublicKey::from(&sk);
         let macs = macs::Validator::new(pk);
-        KeyState { pk, sk, macs }
+        KeyState { pk, sk }
     });
 
     ipc.writer.write(state.keyst.as_ref().unwrap().pk.as_bytes()).unwrap();

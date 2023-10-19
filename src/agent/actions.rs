@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use std::time::Instant;
 
 use aead::{Aead, NewAead, Payload};
 use blake2::Blake2s;
@@ -10,7 +9,6 @@ use digest::consts::U32;
 use generic_array::GenericArray;
 use hmac::Hmac;
 use rand::rngs::OsRng;
-use spin::Mutex;
 use subtle::ConstantTimeEq;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zerocopy::AsBytes;
@@ -19,9 +17,8 @@ use crate::agent::ipc::{ConsumeInitiatorResponse, ConsumeResponse, ConsumeRespon
 use crate::agent::types::{Peer, State};
 use crate::agent::types::KeyState;
 use crate::wireguard::handshake::{macs, timestamp, TYPE_INITIATION};
-use crate::wireguard::handshake::messages::{Initiation, NoiseInitiation, NoiseResponse};
+use crate::wireguard::handshake::messages::{Initiation, NoiseInitiation};
 use crate::wireguard::handshake::noise::shared_secret;
-use crate::wireguard::handshake::timestamp::TAI64N;
 use crate::wireguard::handshake::types::HandshakeError;
 
 // HMAC hasher (generic construction)
@@ -127,7 +124,7 @@ pub fn set_private_key(pk: [u8;32], state: &mut State) {
     let pk = PublicKey::from(&psk);
     let macs = macs::Validator::new(pk);
 
-    state.keyst = Some(KeyState { pk, sk: psk, macs });
+    state.keyst = Some(KeyState { pk, sk: psk });
 
     for (public_key, peer) in &mut state.pk_map {
         let pk = PublicKey::from(public_key.clone());
@@ -141,7 +138,6 @@ pub fn set_private_key(pk: [u8;32], state: &mut State) {
 pub fn register_public_key(public_key: &RegisterPublicKey, state: &mut State) {
     let pk = PublicKey::from(public_key.public_key);
     state.pk_map.insert(public_key.public_key, Peer {
-        macs: macs::Generator::new(pk),
         psk: public_key.preshared_key,
         ss: state.keyst
             .as_ref()
